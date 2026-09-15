@@ -1,11 +1,11 @@
 {
   "chainId": 11155111,
-  "deployedAt": "2026-09-15T12:37:38.836Z",
+  "deployedAt": "2026-09-15T18:49:03.179Z",
   "addresses": {
-    "token": "0x04fa3bd7835544e72a9c0262a74b67d6c6afea13",
-    "baselineVault": "0x4434db01b8de6b55db6afa7156066d2cbd5d57b4",
-    "baselineBroker": "0xfc6bd1dd0595b7194ff6b16d6032975c08a798de",
-    "harnessedVault": "0x12526de605e4723d0b8d8c18b37bad68103ce9bd",
-    "harnessedBroker": "0x0c8c4b29acc0716db6ff999bc9017bf4b15728a7"
+    "token": "0x8f7bd6a65d66258e5ca43813b7fc4155f27d0c9b",
+    "baselineVault": "0x1ae680e9498c05925a019e5ef2a3b1bc891d38de",
+    "baselineBroker": "0x47404ee6545176d4117fc26e77f7a16e8e56ac04",
+    "harnessedVault": "0x3de983c58a180ac60b8aa22740aac8f3adec4663",
+    "harnessedBroker": "0xd842f247f81f3ab1a570147fa669c0a4540fdc88"
   }
 }
