@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {XLS65Vault} from "./XLS65Vault.sol";
 import {XLS66LoanBroker} from "./XLS66LoanBroker.sol";
 
-/// @notice Policy-enforced XLS-66 broker proposed by the drafting presentation.
+/// @notice XLS-66 broker with concentration, recovery-lock, and history-linked cover policies.
 /// @dev This contract is intentionally separate from the harness-free baseline.
 contract XLS66LoanBrokerHarness is XLS66LoanBroker {
     struct TimedAmount {
@@ -62,30 +62,35 @@ contract XLS66LoanBrokerHarness is XLS66LoanBroker {
         historySlope = historySlope_;
     }
 
-    /// @notice Effective CRM = max(broker CRM, floor + lambda * rolling default rate).
+    /// @notice CRM_eff = max(CRM_set, CRM_floor + lambda * DefaultRate_T).
+    /// @dev DefaultRate_T = defaults in T / originated principal in T. The
+    ///      presentation formula does not cap DefaultRate_T or CRM_eff at 100%.
     function effectiveCoverRateMinimum() public view override returns (uint256) {
-        (uint256 originated, uint256 defaulted) = historyTotals();
-        uint256 defaultRate;
-        if (defaulted != 0) {
-            defaultRate =
-                originated == 0 ? RATE_DENOMINATOR : _min(defaulted * RATE_DENOMINATOR / originated, RATE_DENOMINATOR);
-        }
-        uint256 linkedRate = uint256(coverRateFloor) + uint256(historySlope) * defaultRate / RATE_DENOMINATOR;
-        linkedRate = _min(linkedRate, RATE_DENOMINATOR);
+        uint256 linkedRate = uint256(coverRateFloor) + uint256(historySlope) * defaultRate() / RATE_DENOMINATOR;
         return linkedRate > coverRateMinimum ? linkedRate : coverRateMinimum;
+    }
+
+    function defaultRate() public view returns (uint256) {
+        (uint256 originated, uint256 defaulted) = historyTotals();
+        return originated == 0 ? 0 : defaulted * RATE_DENOMINATOR / originated;
+    }
+
+    /// @notice max(DebtTotal + L_new, D_floor), shared by both concentration checks.
+    function concentrationBase(uint256 newLoan) public view returns (uint256) {
+        uint256 postLoanDebt = debtTotal + newLoan;
+        return postLoanDebt > debtFloor ? postLoanDebt : debtFloor;
     }
 
     function loanSet(LoanTerms calldata terms) public override returns (uint256 loanId) {
         uint256 postPrincipal = principalTotal + terms.principal;
-        uint256 concentrationBase = postPrincipal > debtFloor ? postPrincipal : debtFloor;
+        uint256 base = concentrationBase(terms.principal);
 
-        if (terms.principal > concentrationBase * singleLoanLimitRate / RATE_DENOMINATOR) {
+        if (terms.principal > base * singleLoanLimitRate / RATE_DENOMINATOR) {
             revert ConcentrationLimitExceeded();
         }
-        if (
-            borrowerExposure[terms.borrower] + terms.principal
-                > concentrationBase * borrowerLimitRate / RATE_DENOMINATOR
-        ) revert BorrowerLimitExceeded();
+        if (borrowerExposure[terms.borrower] + terms.principal > base * borrowerLimitRate / RATE_DENOMINATOR) {
+            revert BorrowerLimitExceeded();
+        }
 
         loanId = super.loanSet(terms);
         principalTotal = postPrincipal;
@@ -108,7 +113,7 @@ contract XLS66LoanBrokerHarness is XLS66LoanBroker {
         address borrower = loan.borrower;
         uint256 principal = loan.principalOutstanding;
         uint256 defaultAmount = loan.totalValueOutstanding - loan.managementFeeOutstanding;
-        uint256 lockAmount = defaultAmount * effectiveCoverRateMinimum() / RATE_DENOMINATOR;
+        uint256 lockAmount = defaultAmount * coverRateMinimum / RATE_DENOMINATOR;
 
         super.defaultLoan(loanId);
 
@@ -163,9 +168,5 @@ contract XLS66LoanBrokerHarness is XLS66LoanBroker {
 
     function coverLocksLength() external view returns (uint256) {
         return _coverLocks.length;
-    }
-
-    function _min(uint256 a, uint256 b) private pure returns (uint256) {
-        return a < b ? a : b;
     }
 }

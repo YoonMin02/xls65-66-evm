@@ -8,22 +8,23 @@ minimum cover rate에 추가 제약을 적용합니다. 정책값은 생성 시 
 `loanSet` 실행 전에 단일 대출과 Borrower별 누적 원금을 검사합니다.
 
 ```text
-concentrationBase = max(postLoanPrincipalTotal, debtFloor)
+concentrationBase = max(DebtTotal + newPrincipal, debtFloor)
 
 newPrincipal <= singleLoanLimitRate × concentrationBase
 borrowerExposure + newPrincipal <= borrowerLimitRate × concentrationBase
 ```
 
-`debtFloor`는 초기 대출의 분모가 지나치게 작아지는 것을 방지합니다. 집중도는 미래 이자를 포함하는
-`DebtTotal` 대신 실제 outstanding principal을 기준으로 계산합니다.
+첫 번째 식은 발표자료의 단일 대출 한도와 같습니다. 두 번째 식에는 빈 Vault에서도 여러 차주의 대출을
+순차적으로 구성할 수 있도록 동일한 `debtFloor`를 추가했습니다. `borrowerExposure`는 해당 차주의 현재
+미상환 원금 합계입니다.
 
 ## Cover 회수 지연
 
-대출이 default되면 당시 effective cover rate에 해당하는 금액을 `recoveryPeriod` 동안 출금할 수 없도록
+대출이 default되면 설정된 minimum cover rate에 해당하는 금액을 `recoveryPeriod` 동안 출금할 수 없도록
 기록합니다.
 
 ```text
-lockedCover = defaultAmount × effectiveCoverRateMinimum
+lockedCover = defaultAmount × coverRateMinimum
 withdrawableCover = max(0, CoverAvailable - MinimumCover - activeLockedCover)
 ```
 
@@ -32,16 +33,16 @@ withdrawableCover = max(0, CoverAvailable - MinimumCover - activeLockedCover)
 
 ## 이력 연동 Cover Rate
 
-최근 `historyWindow` 동안의 대출 실행액과 default 금액으로 effective cover rate를 계산합니다.
+최근 `historyWindow` 동안의 대출 실행 원금과 default 금액으로 effective cover rate를 계산합니다.
 
 ```text
-defaultRate = min(recentDefaults / recentOriginations, 100%)
-linkedRate = min(coverRateFloor + historySlope × defaultRate, 100%)
-effectiveCRM = max(coverRateMinimum, linkedRate)
+DefaultRate_T = sum(DefaultAmount in T) / sum(executed principal in T)
+effectiveCRM = max(coverRateMinimum, coverRateFloor + historySlope × DefaultRate_T)
 ```
 
-같은 기간에 대출 실행 이력은 없고 default만 남아 있으면 default rate를 100%로 계산합니다. 산출된 비율은
-minimum cover, 신규 대출의 Cover 검사, default waterfall에 동일하게 적용됩니다.
+발표자료의 식에 없는 100% 상한은 적용하지 않습니다. 기간 내 실행 원금이 0이면 디폴트율을 0으로
+처리합니다. 신규 LoanBroker는 이력이 없으므로 `max(coverRateMinimum, coverRateFloor)`에서 시작하고,
+이후 `LoanSet`의 minimum cover 검사와 default waterfall에는 당시의 effective CRM이 사용됩니다.
 
 ## Vault 바인딩
 

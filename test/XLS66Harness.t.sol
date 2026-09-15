@@ -55,6 +55,17 @@ contract XLS66HarnessTest is Test {
         broker.loanSet(terms);
     }
 
+    function testConcentrationBaseUsesDebtTotalPlusNewLoan() public {
+        for (uint160 i = 1; i <= 7; ++i) {
+            _createLoan(address(0x1000 + i), 700 * USDC);
+        }
+
+        uint256 newLoan = 10 * USDC;
+        assertGt(broker.debtTotal(), broker.debtFloor());
+        assertEq(broker.concentrationBase(newLoan), broker.debtTotal() + newLoan);
+        assertGt(broker.concentrationBase(newLoan), broker.principalTotal() + newLoan);
+    }
+
     function testBorrowerAggregateLimit() public {
         _createLoan(borrower, 900 * USDC);
 
@@ -105,8 +116,15 @@ contract XLS66HarnessTest is Test {
         broker.defaultLoan(id);
 
         uint256 rateAfter = broker.effectiveCoverRateMinimum();
+        (uint256 originated, uint256 defaulted) = broker.historyTotals();
+        uint256 defaultRate = defaulted * broker.RATE_DENOMINATOR() / originated;
+        uint256 linkedRate =
+            broker.coverRateFloor() + uint256(broker.historySlope()) * defaultRate / broker.RATE_DENOMINATOR();
+        uint256 expectedRate = linkedRate > broker.coverRateMinimum() ? linkedRate : broker.coverRateMinimum();
         assertEq(rateBefore, 10_000, "new broker starts at floor");
-        assertEq(rateAfter, 30_000, "100% rolling default rate adds 20 percentage points");
+        assertEq(broker.defaultRate(), defaultRate, "DefaultRate_T follows defaults divided by executed principal");
+        assertEq(rateAfter, expectedRate, "CRM follows the presentation formula without a 100% cap");
+        assertGt(rateAfter, 30_000, "default amount can exceed originated principal because it includes interest");
 
         address secondBorrower = address(0xCAFE);
         _createLoan(secondBorrower, 500 * USDC);
@@ -114,6 +132,24 @@ contract XLS66HarnessTest is Test {
         assertGt(currentRate, rateBefore, "default history still raises the next loan's cover rate");
         assertLt(currentRate, rateAfter, "new origination updates the rolling default-rate denominator");
         assertEq(broker.minimumCover(), broker.debtTotal() * currentRate / broker.RATE_DENOMINATOR());
+    }
+
+    function testRecoveryLockUsesConfiguredCoverRateMinimum() public {
+        uint256 firstId = _createLoan(borrower, 500 * USDC);
+        XLS66LoanBroker.Loan memory firstLoan = broker.getLoan(firstId);
+        vm.warp(uint256(firstLoan.nextPaymentDueDate) + firstLoan.gracePeriod + 1);
+        broker.defaultLoan(firstId);
+        assertGt(broker.effectiveCoverRateMinimum(), broker.coverRateMinimum());
+
+        address secondBorrower = address(0xCAFE);
+        uint256 secondId = _createLoan(secondBorrower, 500 * USDC);
+        XLS66LoanBroker.Loan memory secondLoan = broker.getLoan(secondId);
+        vm.warp(uint256(secondLoan.nextPaymentDueDate) + secondLoan.gracePeriod + 1);
+        uint256 secondDefaultAmount = secondLoan.totalValueOutstanding - secondLoan.managementFeeOutstanding;
+        broker.defaultLoan(secondId);
+
+        uint256 expectedLock = secondDefaultAmount * broker.coverRateMinimum() / broker.RATE_DENOMINATOR();
+        assertEq(broker.lockedCover(), expectedLock, "lock uses CoverRateMinimum, not effective CRM");
     }
 
     function testPrincipalExposureFallsWhenLoanIsRepaid() public {

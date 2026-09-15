@@ -47,8 +47,13 @@ type SideState = {
 type HarnessPolicy = {
   singleLoan: bigint;
   borrowerLimit: bigint;
+  debtFloor: bigint;
   recoveryPeriod: bigint;
   historyWindow: bigint;
+  coverRateMinimum: bigint;
+  coverRateLiquidation: bigint;
+  coverRateFloor: bigint;
+  historySlope: bigint;
 };
 type Snapshot = { block: number; timestamp: number; readAt: number };
 type TxLog = { label: string; hash?: string; status: TxStatus; block?: number };
@@ -70,7 +75,17 @@ const ZERO_SIDE: SideState = {
   brokerPointsBack: false,
   codePresent: false,
 };
-const ZERO_POLICY: HarnessPolicy = { singleLoan: 0n, borrowerLimit: 0n, recoveryPeriod: 0n, historyWindow: 0n };
+const ZERO_POLICY: HarnessPolicy = {
+  singleLoan: 0n,
+  borrowerLimit: 0n,
+  debtFloor: 0n,
+  recoveryPeriod: 0n,
+  historyWindow: 0n,
+  coverRateMinimum: 0n,
+  coverRateLiquidation: 0n,
+  coverRateFloor: 0n,
+  historySlope: 0n,
+};
 const USDC = (value: string) => parseUnits(value, 6);
 const fmt = (value: bigint, digits = 2) => Number(formatUnits(value, 6)).toLocaleString('ko-KR', { maximumFractionDigits: digits });
 const percent = (value: bigint) => `${(Number(value) / 1000).toFixed(1)}%`;
@@ -135,8 +150,10 @@ function ProtocolCard({ kind, state, policy, expectedBroker }: { kind: Kind; sta
     {harnessed && <div className="controls">
       <span>{percent(policy.singleLoan)} 단일대출</span>
       <span>{percent(policy.borrowerLimit)} 차주한도</span>
+      <span>D_floor ${fmt(policy.debtFloor, 0)}</span>
       <span>{duration(policy.recoveryPeriod)} 회수지연</span>
-      <span>이력연동 CRM</span>
+      <span>CRM {percent(policy.coverRateMinimum)} · CRL {percent(policy.coverRateLiquidation)}</span>
+      <span>이력 CRM: {percent(policy.coverRateFloor)} + {percent(policy.historySlope)} × DefaultRate</span>
     </div>}
     <div className="metrics">
       <Metric label="Vault total" getter="assetsTotal" value={`$${fmt(state.assetsTotal)}`} />
@@ -267,13 +284,28 @@ export default function App() {
         Promise.all([
           contracts.harness.broker.singleLoanLimitRate(at),
           contracts.harness.broker.borrowerLimitRate(at),
+          contracts.harness.broker.debtFloor(at),
           contracts.harness.broker.recoveryPeriod(at),
           contracts.harness.broker.historyWindow(at),
+          contracts.harness.broker.coverRateMinimum(at),
+          contracts.harness.broker.coverRateLiquidation(at),
+          contracts.harness.broker.coverRateFloor(at),
+          contracts.harness.broker.historySlope(at),
         ]),
       ]);
       setBaseline(baseState);
       setHarness(harnessState);
-      setPolicy({ singleLoan: policyState[0], borrowerLimit: policyState[1], recoveryPeriod: policyState[2], historyWindow: policyState[3] });
+      setPolicy({
+        singleLoan: policyState[0],
+        borrowerLimit: policyState[1],
+        debtFloor: policyState[2],
+        recoveryPeriod: policyState[3],
+        historyWindow: policyState[4],
+        coverRateMinimum: policyState[5],
+        coverRateLiquidation: policyState[6],
+        coverRateFloor: policyState[7],
+        historySlope: policyState[8],
+      });
       setSnapshot({ block: blockNumber, timestamp: Number(block?.timestamp || 0), readAt: Date.now() });
       setError('');
     } catch (e) {
