@@ -1,0 +1,11 @@
+{
+  "chainId": 11155111,
+  "deployedAt": "2026-09-15T12:37:38.836Z",
+  "addresses": {
+    "token": "0x04fa3bd7835544e72a9c0262a74b67d6c6afea13",
+    "baselineVault": "0x4434db01b8de6b55db6afa7156066d2cbd5d57b4",
+    "baselineBroker": "0xfc6bd1dd0595b7194ff6b16d6032975c08a798de",
+    "harnessedVault": "0x12526de605e4723d0b8d8c18b37bad68103ce9bd",
+    "harnessedBroker": "0x0c8c4b29acc0716db6ff999bc9017bf4b15728a7"
+  }
+}
