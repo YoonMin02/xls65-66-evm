@@ -165,6 +165,55 @@ contract XLS66HarnessTest is Test {
         assertEq(broker.borrowerExposure(borrower), 0);
     }
 
+    function testFrontendConcentrationScenarioRejectsSixHundred() public {
+        XLS66LoanBrokerHarness demoBroker = _frontendBroker(200 * USDC);
+        XLS66LoanBroker.LoanTerms memory terms = _terms(borrower, 600 * USDC);
+        terms.paymentInterval = 60;
+        terms.gracePeriod = 60;
+        vm.prank(borrower);
+        demoBroker.approveLoanTerms(terms);
+
+        vm.expectRevert(XLS66LoanBrokerHarness.ConcentrationLimitExceeded.selector);
+        demoBroker.loanSet(terms);
+    }
+
+    function testFrontendHistoryScenarioRejectsSecondLoanForCover() public {
+        XLS66LoanBrokerHarness demoBroker = _frontendBroker(100 * USDC);
+        XLS66LoanBroker.LoanTerms memory terms = _terms(borrower, 500 * USDC);
+        terms.paymentInterval = 60;
+        terms.gracePeriod = 60;
+        vm.prank(borrower);
+        demoBroker.approveLoanTerms(terms);
+        uint256 loanId = demoBroker.loanSet(terms);
+
+        XLS66LoanBroker.Loan memory loan = demoBroker.getLoan(loanId);
+        vm.warp(uint256(loan.nextPaymentDueDate) + loan.gracePeriod + 1);
+        demoBroker.defaultLoan(loanId);
+        assertEq(demoBroker.effectiveCoverRateMinimum(), 30_000);
+
+        vm.prank(borrower);
+        demoBroker.approveLoanTerms(terms);
+        vm.expectRevert(XLS66LoanBroker.CoverInsufficient.selector);
+        demoBroker.loanSet(terms);
+    }
+
+    function _frontendBroker(uint256 cover) private returns (XLS66LoanBrokerHarness demoBroker) {
+        XLS65Vault demoVault = new XLS65Vault(token, "Frontend Harness Vault", "fhvUSDC", 6, 0, false, true);
+        demoBroker = new XLS66LoanBrokerHarness(
+            demoVault, 1_000, 0, 10_000, 10_000, 20_000, 30_000, 2_500 * USDC, 30 days, 365 days, 10_000, 20_000
+        );
+        demoVault.bindBroker(address(demoBroker));
+
+        token.mint(lender, 1_000 * USDC);
+        vm.startPrank(lender);
+        token.approve(address(demoVault), 1_000 * USDC);
+        demoVault.deposit(1_000 * USDC, lender);
+        vm.stopPrank();
+
+        token.approve(address(demoBroker), cover);
+        demoBroker.coverDeposit(cover);
+    }
+
     function _createLoan(address loanBorrower, uint256 principal) internal returns (uint256) {
         XLS66LoanBroker.LoanTerms memory terms = _terms(loanBorrower, principal);
         vm.prank(loanBorrower);

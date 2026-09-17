@@ -26,8 +26,9 @@ import {
 } from './session';
 
 type Kind = 'baseline' | 'harness';
-type StepKey = 'setup' | 'approve' | 'issue' | 'wait' | 'default' | 'recover';
-type TxStatus = 'signing' | 'mining' | 'confirmed' | 'error';
+type ScenarioKey = 'concentration' | 'recovery' | 'history';
+type StepKey = 'setup' | 'approve' | 'issue' | 'wait' | 'default' | 'recover' | 'concentration' | 'reapprove' | 'history';
+type TxStatus = 'signing' | 'mining' | 'confirmed' | 'verified' | 'error';
 type LoanView = {
   id: bigint;
   status: number;
@@ -67,6 +68,7 @@ type HarnessPolicy = {
 type Snapshot = { block: number; timestamp: number; readAt: number };
 type TxLog = { label: string; hash?: string; status: TxStatus; block?: number };
 type RoleAddresses = { owner: string; depositor: string; borrower: string };
+type Stage = { key: StepKey; n: string; title: string; role: string; tx: string; explanation: string };
 
 const ZERO_SIDE: SideState = {
   assetsTotal: 0n,
@@ -105,9 +107,9 @@ const validAddress = (value: string) => /^0x[0-9a-fA-F]{40}$/.test(value);
 const statusName = ['없음', '진행 중', '손상 인식', '상환 완료', 'Default'];
 const RPC_PROVIDER = publicProvider();
 
-function loanTerms(borrower: string) {
+function loanTerms(borrower: string, principal = '500') {
   return [
-    borrower, USDC('500'), 0n, USDC('1'), USDC('2'), USDC('1'),
+    borrower, USDC(principal), 0n, USDC('1'), USDC('2'), USDC('1'),
     10_000, 5_000, 1_000, 12, 60, 60,
   ] as const;
 }
@@ -130,8 +132,8 @@ function Source({ getter }: { getter: string }) {
   return <code className="source">{getter}()</code>;
 }
 
-function Metric({ label, value, getter, tone }: { label: string; value: string; getter: string; tone?: 'good' | 'warn' }) {
-  return <div className={`metric ${tone || ''}`}><span>{label}<Source getter={getter} /></span><strong>{value}</strong></div>;
+function Metric({ label, value, getter, tone, different }: { label: string; value: string; getter: string; tone?: 'good' | 'warn'; different?: boolean }) {
+  return <div className={`metric ${tone || ''} ${different ? 'different' : ''}`}><span>{label}<Source getter={getter} /></span><strong>{value}</strong></div>;
 }
 
 function Binding({ state, expected }: { state: SideState; expected: string }) {
@@ -143,7 +145,7 @@ function Binding({ state, expected }: { state: SideState; expected: string }) {
   </div>;
 }
 
-function ProtocolCard({ kind, state, policy, expectedBroker }: { kind: Kind; state: SideState; policy: HarnessPolicy; expectedBroker: string }) {
+function ProtocolCard({ kind, state, peer, policy, expectedBroker }: { kind: Kind; state: SideState; peer: SideState; policy: HarnessPolicy; expectedBroker: string }) {
   const harnessed = kind === 'harness';
   return <article className={`protocol ${harnessed ? 'guarded' : 'baseline'}`}>
     <header>
@@ -158,23 +160,23 @@ function ProtocolCard({ kind, state, policy, expectedBroker }: { kind: Kind; sta
       <div><b>{harnessed ? 'Harnessed LoanBroker' : 'LoanBroker'}</b><small>FLC + 신용심사</small></div><i>→</i>
       <div><b>Borrower</b><small>무담보 대출</small></div>
     </div>
-    {harnessed && <div className="controls">
+    {harnessed ? <div className="controls">
       <span>{percent(policy.singleLoan)} 단일대출</span>
       <span>{percent(policy.borrowerLimit)} 차주한도</span>
       <span>D_floor ${fmt(policy.debtFloor, 0)}</span>
       <span>{duration(policy.recoveryPeriod)} 회수지연</span>
       <span>CRM {percent(policy.coverRateMinimum)} · CRL {percent(policy.coverRateLiquidation)}</span>
       <span>이력 CRM: {percent(policy.coverRateFloor)} + {percent(policy.historySlope)} × DefaultRate</span>
-    </div>}
+    </div> : <div className="controls controls-placeholder"><span>추가 위험 통제 없음</span></div>}
     <div className="metrics">
-      <Metric label="Vault total" getter="assetsTotal" value={`$${fmt(state.assetsTotal)}`} />
-      <Metric label="Available" getter="assetsAvailable" value={`$${fmt(state.assetsAvailable)}`} />
-      <Metric label="Debt total" getter="debtTotal" value={`$${fmt(state.debt)}`} />
-      <Metric label="Cover" getter="coverAvailable" value={`$${fmt(state.cover)}`} />
-      <Metric label="Required cover" getter="minimumCover" value={`$${fmt(state.minimumCover)}`} />
-      <Metric label="Effective CRM" getter="effectiveCoverRateMinimum" value={percent(state.effectiveRate)} tone={harnessed && state.effectiveRate > 10_000n ? 'good' : undefined} />
-      <Metric label="Recovery locked" getter={harnessed ? 'lockedCover' : 'N/A'} value={`$${fmt(state.locked)}`} tone={harnessed && state.locked > 0n ? 'good' : undefined} />
-      <Metric label="Withdrawable" getter={harnessed ? 'withdrawableCover' : 'cover-required'} value={`$${fmt(state.withdrawable)}`} tone={!harnessed && state.withdrawable > 0n ? 'warn' : undefined} />
+      <Metric label="Vault total" getter="assetsTotal" value={`$${fmt(state.assetsTotal)}`} different={state.assetsTotal !== peer.assetsTotal} />
+      <Metric label="Available" getter="assetsAvailable" value={`$${fmt(state.assetsAvailable)}`} different={state.assetsAvailable !== peer.assetsAvailable} />
+      <Metric label="Debt total" getter="debtTotal" value={`$${fmt(state.debt)}`} different={state.debt !== peer.debt} />
+      <Metric label="Cover" getter="coverAvailable" value={`$${fmt(state.cover)}`} different={state.cover !== peer.cover} />
+      <Metric label="Required cover" getter="minimumCover" value={`$${fmt(state.minimumCover)}`} different={state.minimumCover !== peer.minimumCover} />
+      <Metric label="Effective CRM" getter="effectiveCoverRateMinimum" value={percent(state.effectiveRate)} different={state.effectiveRate !== peer.effectiveRate} tone={harnessed && state.effectiveRate > 10_000n ? 'good' : undefined} />
+      <Metric label="Recovery locked" getter={harnessed ? 'lockedCover' : 'N/A'} value={`$${fmt(state.locked)}`} different={state.locked !== peer.locked} tone={harnessed && state.locked > 0n ? 'good' : undefined} />
+      <Metric label="Withdrawable" getter={harnessed ? 'withdrawableCover' : 'cover-required'} value={`$${fmt(state.withdrawable)}`} different={state.withdrawable !== peer.withdrawable} tone={!harnessed && state.withdrawable > 0n ? 'warn' : undefined} />
     </div>
     <p className="reading">{state.loan
       ? `Loan #${state.loan.id}: ${statusName[state.loan.status] || state.loan.status} · 원금 $${fmt(state.loan.principal)}`
@@ -188,20 +190,53 @@ function Pill({ status }: { status: StageStatus }) {
   return <span className={`stage-pill ${status}`}><i />{text}</span>;
 }
 
-function stageStatus(key: StepKey, side: SideState, chainTime: number, harnessed: boolean): StageStatus {
+const SCENARIOS: Array<{ key: ScenarioKey; number: string; title: string; summary: string; result: string }> = [
+  {
+    key: 'concentration',
+    number: '01',
+    title: 'Concentration limit',
+    summary: 'D_floor 기준 한도를 넘는 $600 단일 대출을 양쪽에 적용합니다.',
+    result: 'Baseline은 실행되고 Harness는 집중도 정책으로 차단됩니다.',
+  },
+  {
+    key: 'recovery',
+    number: '02',
+    title: 'Recovery timelock',
+    summary: '동일한 $500 대출을 Default 처리한 직후 Cover 회수를 시도합니다.',
+    result: 'Baseline은 전액 회수하지만 Harness는 T_lock 금액을 30일간 남깁니다.',
+  },
+  {
+    key: 'history',
+    number: '03',
+    title: 'History-linked cover rate',
+    summary: '동일한 Default 이력을 만든 뒤 같은 $500 후속 대출을 적용합니다.',
+    result: 'Harness의 CRM만 상승하여 같은 Cover에서 후속 대출이 차단됩니다.',
+  },
+];
+
+function stageStatus(key: StepKey, side: SideState, peer: SideState, chainTime: number, harnessed: boolean): StageStatus {
   if (key === 'setup') return side.assetsTotal > 0n && side.cover > 0n ? 'done' : 'ready';
-  if (key === 'approve') return side.approval ? 'done' : 'ready';
+  if (key === 'approve') return side.approval || side.loan ? 'done' : side.assetsTotal > 0n ? 'ready' : 'waiting';
   if (key === 'issue') return side.loan ? 'done' : side.approval ? 'ready' : 'waiting';
   if (key === 'wait') return side.loan && chainTime > side.loan.defaultAt ? 'done' : 'waiting';
   if (key === 'default') return side.loan?.status === 4 ? 'done' : side.loan && chainTime > side.loan.defaultAt ? 'ready' : 'waiting';
+  if (key === 'concentration') {
+    if (!harnessed) return side.loan ? 'done' : side.approval ? 'ready' : 'waiting';
+    return peer.loan && !side.loan ? 'blocked' : side.approval ? 'ready' : 'waiting';
+  }
+  if (key === 'reapprove') return side.approval || (side.loan?.id ?? 0n) > 1n ? 'done' : side.loan?.status === 4 ? 'ready' : 'waiting';
+  if (key === 'history') {
+    if (!harnessed) return (side.loan?.id ?? 0n) > 1n ? 'done' : side.approval ? 'ready' : 'waiting';
+    return (peer.loan?.id ?? 0n) > 1n && (side.loan?.id ?? 0n) === 1n ? 'blocked' : side.approval ? 'ready' : 'waiting';
+  }
   if (side.loan?.status !== 4) return 'waiting';
-  if (harnessed && side.locked > 0n && side.withdrawable === 0n) return 'blocked';
+  if (harnessed) return side.locked > 0n && side.withdrawable === 0n ? 'blocked' : 'ready';
   return side.cover === 0n ? 'done' : 'ready';
 }
 
-function stageEvidence(key: StepKey, side: SideState, chainTime: number, harnessed: boolean) {
+function stageEvidence(key: StepKey, side: SideState, peer: SideState, chainTime: number, harnessed: boolean) {
   if (key === 'setup') return `Vault ${fmt(side.assetsTotal)} · Cover ${fmt(side.cover)}`;
-  if (key === 'approve') return side.approval ? 'borrowerApprovals = true' : 'borrowerApprovals = false';
+  if (key === 'approve') return side.approval || side.loan ? '대출 조건 동의 확인' : '대출 조건 동의 전';
   if (key === 'issue') return side.loan ? `Loan #${side.loan.id} · ${statusName[side.loan.status]}` : 'Loan 없음';
   if (key === 'wait') {
     if (!side.loan) return '대출 실행 전';
@@ -209,6 +244,17 @@ function stageEvidence(key: StepKey, side: SideState, chainTime: number, harness
     return left ? `${left}초 후 default 가능` : '유예기간 경과';
   }
   if (key === 'default') return side.loan?.status === 4 ? `Debt ${fmt(side.debt)} · Cover ${fmt(side.cover)}` : 'default 미처리';
+  if (key === 'concentration') {
+    if (!harnessed) return side.loan ? `$600 실행 · Debt ${fmt(side.debt)}` : '$600 실행 전';
+    return peer.loan && !side.loan ? 'ConcentrationLimitExceeded' : '$600 정책 검사 전';
+  }
+  if (key === 'reapprove') return side.approval ? '후속 대출 동의 확인' : '후속 대출 동의 전';
+  if (key === 'history') {
+    if (!harnessed) return (side.loan?.id ?? 0n) > 1n ? `CRM ${percent(side.effectiveRate)} · 후속 대출 실행` : `CRM ${percent(side.effectiveRate)}`;
+    return (peer.loan?.id ?? 0n) > 1n && (side.loan?.id ?? 0n) === 1n
+      ? `CRM ${percent(side.effectiveRate)} · CoverInsufficient`
+      : `CRM ${percent(side.effectiveRate)}`;
+  }
   return harnessed
     ? `Locked ${fmt(side.locked)} · 회수가능 ${fmt(side.withdrawable)}`
     : `Locked 없음 · 회수가능 ${fmt(side.withdrawable)}`;
@@ -219,6 +265,7 @@ export default function App() {
   const [walletProvider, setWalletProvider] = useState<BrowserProvider>();
   const [account, setAccount] = useState('');
   const [roles, setRoles] = useState<RoleAddresses | null>(null);
+  const [scenario, setScenario] = useState<ScenarioKey | null>(null);
   const [baseline, setBaseline] = useState<SideState>(ZERO_SIDE);
   const [harness, setHarness] = useState<SideState>(ZERO_SIDE);
   const [policy, setPolicy] = useState<HarnessPolicy>(ZERO_POLICY);
@@ -260,7 +307,8 @@ export default function App() {
 
         let approval = false;
         if (validAddress(roles.borrower)) {
-          const hash = await side.broker.hashLoanTerms(loanTerms(roles.borrower), at);
+          const principal = scenario === 'concentration' ? '600' : '500';
+          const hash = await side.broker.hashLoanTerms(loanTerms(roles.borrower, principal), at);
           approval = await side.broker.borrowerApprovals(hash, at);
         }
 
@@ -319,7 +367,7 @@ export default function App() {
     } catch (e) {
       setError(`온체인 조회 실패: ${e instanceof Error ? e.message.slice(0, 300) : String(e)}`);
     } finally { setRefreshing(false); }
-  }, [contracts, deployment, roles]);
+  }, [contracts, deployment, roles, scenario]);
 
   useEffect(() => {
     if (!window.ethereum) return;
@@ -346,6 +394,15 @@ export default function App() {
     setRoles({ owner: wallets.owner.address, depositor: wallets.depositor.address, borrower: wallets.borrower.address });
     setDeployment(loadDeployment(account));
   }, [account]);
+
+  useEffect(() => {
+    if (!deployment) {
+      setScenario(null);
+      return;
+    }
+    const stored = localStorage.getItem(`xls66:auto:scenario:${deployment.addresses.harnessedBroker}`);
+    setScenario(stored === 'concentration' || stored === 'recovery' || stored === 'history' ? stored : null);
+  }, [deployment]);
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
@@ -391,6 +448,43 @@ export default function App() {
     }
   }
 
+  async function transactExpectedRevert(label: string, action: () => Promise<ContractTransactionResponse>) {
+    const key = `${label}-${Date.now()}`;
+    setLogs(old => [{ label: key, status: 'signing' }, ...old]);
+    let tx: ContractTransactionResponse;
+    try {
+      tx = await action();
+    } catch (cause) {
+      setLogs(old => old.map(x => x.label === key ? { ...x, label, status: 'error' } : x));
+      throw cause;
+    }
+    setLogs(old => old.map(x => x.label === key ? { label, hash: tx.hash, status: 'mining' } : x));
+    try {
+      const receipt = await tx.wait();
+      if (receipt?.status === 0) {
+        setLogs(old => old.map(x => x.hash === tx.hash ? { ...x, status: 'verified', block: receipt.blockNumber } : x));
+        return;
+      }
+    } catch (cause) {
+      const receipt = (cause as { receipt?: { status?: number; blockNumber?: number } }).receipt;
+      if (receipt?.status === 0) {
+        setLogs(old => old.map(x => x.hash === tx.hash ? { ...x, status: 'verified', block: receipt.blockNumber } : x));
+        return;
+      }
+      setLogs(old => old.map(x => x.hash === tx.hash ? { ...x, status: 'error' } : x));
+      throw cause;
+    }
+    setLogs(old => old.map(x => x.hash === tx.hash ? { ...x, status: 'error' } : x));
+    throw new Error(`${label}: Harness가 예상과 달리 거래를 허용했습니다.`);
+  }
+
+  function chooseScenario(next: ScenarioKey) {
+    if (!deployment || baseline.assetsTotal > 0n || harness.assetsTotal > 0n) return;
+    localStorage.setItem(`xls66:auto:scenario:${deployment.addresses.harnessedBroker}`, next);
+    setScenario(next);
+    setError('');
+  }
+
   async function createEnvironment() {
     if (!walletProvider || !account) {
       setError('먼저 MetaMask를 연결하세요.');
@@ -405,6 +499,7 @@ export default function App() {
       setHarness(ZERO_SIDE);
       setPolicy(ZERO_POLICY);
       setSnapshot(null);
+      setScenario(null);
       setDeployment(next);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -429,7 +524,7 @@ export default function App() {
   }
 
   async function run(step: StepKey) {
-    if (!contracts || !roles || !account) return;
+    if (!contracts || !roles || !account || !scenario) return;
     setBusy(step); setError('');
     try {
       const wallets: RoleWallets = roleWallets(account, RPC_PROVIDER);
@@ -441,38 +536,56 @@ export default function App() {
       const ownerHb = contracts.harness.broker.connect(wallets.owner) as Contract;
       const borrowerBb = contracts.baseline.broker.connect(wallets.borrower) as Contract;
       const borrowerHb = contracts.harness.broker.connect(wallets.borrower) as Contract;
+      const principal = scenario === 'concentration' ? '600' : '500';
+      const terms = loanTerms(roles.borrower, principal);
+      const cover = scenario === 'history' ? '100' : '200';
 
       if (step === 'setup') {
         await transact('예치자 B에게 2,000 MockUSDC 지급', () => ownerToken.mint(roles.depositor, USDC('2000')));
-        await transact('Owner A에게 400 MockUSDC 지급', () => ownerToken.mint(roles.owner, USDC('400')));
+        await transact(`Owner A에게 ${Number(cover) * 2} MockUSDC 지급`, () => ownerToken.mint(roles.owner, USDC(String(Number(cover) * 2))));
         for (const [name, vault] of [['Baseline', depositorBv], ['Harness', depositorHv]] as const) {
           await transact(`${name} Vault 사용 승인`, async () => depositorToken.approve(await vault.getAddress(), USDC('1000')));
           await transact(`${name} Vault에 B의 1,000 예치`, () => vault.deposit(USDC('1000'), roles.depositor));
         }
         for (const [name, broker] of [['Baseline', ownerBb], ['Harness', ownerHb]] as const) {
-          await transact(`${name} Broker 사용 승인`, async () => ownerToken.approve(await broker.getAddress(), USDC('200')));
-          await transact(`${name} Broker에 Cover 200 예치`, () => broker.coverDeposit(USDC('200')));
+          await transact(`${name} Broker 사용 승인`, async () => ownerToken.approve(await broker.getAddress(), USDC(cover)));
+          await transact(`${name} Broker에 Cover ${cover} 예치`, () => broker.coverDeposit(USDC(cover)));
         }
       }
       if (step === 'approve') {
-        if (!baseline.approval) await transact('Baseline 대출조건 승인', () => borrowerBb.approveLoanTerms(loanTerms(roles.borrower)));
-        if (!harness.approval) await transact('Harness 대출조건 승인', () => borrowerHb.approveLoanTerms(loanTerms(roles.borrower)));
+        if (!baseline.approval) await transact(`Baseline $${principal} 대출조건 승인`, () => borrowerBb.approveLoanTerms(terms));
+        if (!harness.approval) await transact(`Harness $${principal} 대출조건 승인`, () => borrowerHb.approveLoanTerms(terms));
       }
       if (step === 'issue') {
         if (!baseline.loan) {
-          await transact('Baseline Loan 실행', () => ownerBb.loanSet(loanTerms(roles.borrower)));
+          await transact('Baseline 초기 Loan 실행', () => ownerBb.loanSet(terms));
         }
         if (!harness.loan) {
-          await transact('Harness Loan 실행', () => ownerHb.loanSet(loanTerms(roles.borrower)));
+          await transact('Harness 초기 Loan 실행', () => ownerHb.loanSet(terms));
         }
+      }
+      if (step === 'concentration') {
+        await transact('Baseline $600 Loan 실행', () => ownerBb.loanSet(terms));
+        await transactExpectedRevert('Harness 집중도 정책 차단', () => ownerHb.loanSet(terms, { gasLimit: 1_000_000 }));
       }
       if (step === 'default') {
         if (baseline.loan?.status !== 4) await transact('Baseline Loan default', () => ownerBb.defaultLoan(baseline.loan?.id));
         if (harness.loan?.status !== 4) await transact('Harness Loan default', () => ownerHb.defaultLoan(harness.loan?.id));
       }
       if (step === 'recover') {
-        if (baseline.withdrawable > 0n) await transact('Baseline 회수 가능 Cover 전액 출금', () => ownerBb.coverWithdraw(baseline.withdrawable, roles.owner));
+        if (baseline.cover > 0n) await transact('Baseline 남은 Cover 전액 회수', () => ownerBb.coverWithdraw(baseline.cover, roles.owner));
+        if (harness.cover > 0n) {
+          await transactExpectedRevert('Harness T_lock 전액 회수 차단', () => ownerHb.coverWithdraw(harness.cover, roles.owner, { gasLimit: 300_000 }));
+        }
         if (harness.withdrawable > 0n) await transact('Harness가 허용한 Cover만 출금', () => ownerHb.coverWithdraw(harness.withdrawable, roles.owner));
+      }
+      if (step === 'reapprove') {
+        if (!baseline.approval) await transact('Baseline 후속 대출조건 승인', () => borrowerBb.approveLoanTerms(terms));
+        if (!harness.approval) await transact('Harness 후속 대출조건 승인', () => borrowerHb.approveLoanTerms(terms));
+      }
+      if (step === 'history') {
+        await transact('Baseline 후속 $500 Loan 실행', () => ownerBb.loanSet(terms));
+        await transactExpectedRevert('Harness 이력 연동 CRM으로 후속 대출 차단', () => ownerHb.loanSet(terms, { gasLimit: 1_000_000 }));
       }
       await refresh();
     } catch (e) {
@@ -482,21 +595,55 @@ export default function App() {
   }
 
   const chainTime = snapshot?.timestamp || Math.floor(Date.now() / 1000);
-  const stages: { key: StepKey; n: string; title: string; role: string; tx: string; explanation: string }[] = [
-    { key: 'setup', n: '01', title: '유동성과 공탁금 준비', role: '예치자 B · Owner A', tx: '자동 서명 10회', explanation: 'B가 각 Vault에 1,000을 예치하고 A가 각 Broker에 Cover 200을 넣습니다.' },
-    { key: 'approve', n: '02', title: '대출 조건 동의', role: '차주 C', tx: '자동 서명 2회', explanation: 'C의 임시지갑이 양쪽의 동일한 500 대출 조건에 온체인으로 동의합니다.' },
-    { key: 'issue', n: '03', title: '동일한 대출 실행', role: 'Owner A', tx: '자동 서명 2회', explanation: 'A의 임시지갑이 두 Vault에서 각각 500을 C에게 보내고 Debt를 생성합니다.' },
-    { key: 'wait', n: '04', title: '만기와 유예기간 경과', role: '체인 시간', tx: '서명 없음', explanation: '다음 납부기한과 grace period가 지나야 default가 가능합니다.' },
-    { key: 'default', n: '05', title: '양쪽 Default 처리', role: 'Owner A', tx: '자동 서명 2회', explanation: '동일한 부실을 처리하고 Cover와 B의 Vault 손실 변화를 체인에서 읽습니다.' },
-    { key: 'recover', n: '06', title: 'A의 Cover 회수 비교', role: 'Owner A', tx: '자동 서명 최대 2회', explanation: 'Baseline은 남은 Cover를 회수하지만 Harness는 default 관련 금액을 잠급니다.' },
-  ];
+  const commonSetup: Stage = {
+    key: 'setup', n: '01', title: '유동성과 공탁금 준비', role: '예치자 B · Owner A', tx: '자동 서명 10회',
+    explanation: `B가 각 Vault에 1,000을 예치하고 A가 각 Broker에 Cover ${scenario === 'history' ? '100' : '200'}을 넣습니다.`,
+  };
+  const commonApproval: Stage = {
+    key: 'approve', n: '02', title: '대출 조건 동의', role: '차주 C', tx: '자동 서명 2회',
+    explanation: `C가 양쪽의 동일한 $${scenario === 'concentration' ? '600' : '500'} 대출 조건에 온체인으로 동의합니다.`,
+  };
+  const initialIssue: Stage = {
+    key: 'issue', n: '03', title: '동일한 초기 대출 실행', role: 'Owner A', tx: '자동 서명 2회',
+    explanation: '양쪽에서 같은 $500 대출을 실행해 비교 가능한 동일 상태를 만듭니다.',
+  };
+  const waitStage: Stage = {
+    key: 'wait', n: '04', title: '만기와 유예기간 경과', role: '체인 시간', tx: '서명 없음',
+    explanation: '대출 실행 약 2분 뒤 Default가 가능해지며 화면이 체인 시간을 자동 판정합니다.',
+  };
+  const defaultStage: Stage = {
+    key: 'default', n: '05', title: '동일한 Default 처리', role: 'Owner A', tx: '자동 서명 2회',
+    explanation: '같은 대출을 양쪽에서 Default 처리하여 동일한 부실 이력을 만듭니다.',
+  };
+  const stages: Stage[] = scenario === 'concentration'
+    ? [commonSetup, commonApproval, {
+      key: 'concentration', n: '03', title: '$600 집중도 한도 비교', role: 'Owner A', tx: '성공 1회 · 실패 1회',
+      explanation: 'Baseline은 대출을 실행하고 Harness 거래는 20% 단일대출 한도를 넘어 온체인에서 실패합니다.',
+    }]
+    : scenario === 'recovery'
+      ? [commonSetup, commonApproval, initialIssue, waitStage, defaultStage, {
+        key: 'recover', n: '06', title: 'T_lock 중 Cover 회수 비교', role: 'Owner A', tx: '성공 최대 2회 · 실패 1회',
+        explanation: 'Baseline은 전액 회수하고 Harness의 전액 회수 거래는 실패합니다. Harness는 잠기지 않은 금액만 회수합니다.',
+      }]
+      : scenario === 'history'
+        ? [commonSetup, commonApproval, initialIssue, waitStage, defaultStage, {
+          key: 'reapprove', n: '06', title: '동일한 후속 대출 동의', role: '차주 C', tx: '자동 서명 2회',
+          explanation: 'Default 이후 양쪽에 같은 $500 후속 대출 조건을 다시 승인합니다.',
+        }, {
+          key: 'history', n: '07', title: '이력 연동 CRM 비교', role: 'Owner A', tx: '성공 1회 · 실패 1회',
+          explanation: 'Baseline은 고정 CRM으로 실행되고 Harness는 Default 이력으로 CRM이 상승해 Cover 부족으로 실패합니다.',
+        }]
+        : [];
   const actionEnabled = (key: StepKey) => {
-    if (busy || deploying || !deployment || !roles) return false;
+    if (busy || deploying || !deployment || !roles || !scenario) return false;
     if (key === 'setup') return !(baseline.assetsTotal > 0n || harness.assetsTotal > 0n);
-    if (key === 'approve') return !(baseline.approval && harness.approval);
-    if (key === 'issue') return baseline.approval && harness.approval && !(baseline.loan && harness.loan);
+    if (key === 'approve') return baseline.assetsTotal > 0n && harness.assetsTotal > 0n && !baseline.loan && !harness.loan && !(baseline.approval && harness.approval);
+    if (key === 'issue') return baseline.approval && harness.approval && !baseline.loan && !harness.loan;
+    if (key === 'concentration') return baseline.approval && harness.approval && !baseline.loan && !harness.loan;
     if (key === 'default') return !!baseline.loan && !!harness.loan && chainTime > baseline.loan.defaultAt && chainTime > harness.loan.defaultAt && !(baseline.loan.status === 4 && harness.loan.status === 4);
-    if (key === 'recover') return baseline.withdrawable > 0n || harness.withdrawable > 0n;
+    if (key === 'recover') return baseline.loan?.status === 4 && harness.loan?.status === 4 && (baseline.cover > 0n || harness.withdrawable > 0n);
+    if (key === 'reapprove') return baseline.loan?.status === 4 && harness.loan?.status === 4 && !(baseline.approval && harness.approval);
+    if (key === 'history') return baseline.loan?.status === 4 && harness.loan?.status === 4 && baseline.approval && harness.approval;
     return false;
   };
 
@@ -528,7 +675,7 @@ export default function App() {
     </section>
     <section className="log"><header><div><span className="eyebrow">TRANSACTION RECEIPTS</span><h3>배포 거래</h3></div></header>
       {logs.length === 0 ? <p>아직 전송한 거래가 없습니다.</p> : logs.map((log, i) => <div key={`${log.hash || log.label}-${i}`}>
-        <span className={log.status}>{log.status === 'mining' ? '채굴 중' : log.status === 'confirmed' ? '반영 완료' : log.status === 'error' ? '실패' : '자동 서명'}</span>
+        <span className={log.status}>{log.status === 'mining' ? '확정 대기' : log.status === 'confirmed' ? '온체인 반영 완료' : log.status === 'verified' ? '정책 차단 확인' : log.status === 'error' ? '실패' : '자동 서명'}</span>
         <b>{log.label}</b>{log.block && <small>block #{log.block.toLocaleString()}</small>}
         {log.hash && <a href={explorer(log.hash)} target="_blank">{short(log.hash)} ↗</a>}</div>)}
     </section>
@@ -563,42 +710,58 @@ export default function App() {
 
     <section className="difference">
       <span>현재 체인에서 확인되는 핵심 차이</span>
-      <strong>{harness.locked > 0n
-        ? baseline.cover === 0n
-          ? `Baseline은 남은 Cover를 이미 전부 회수했지만, Harness에는 A의 Cover ${fmt(harness.locked)}가 잠겨 있습니다.`
-          : `Harness는 A의 Cover ${fmt(harness.locked)}를 잠갔고, Baseline은 ${fmt(baseline.withdrawable)}를 지금 회수할 수 있습니다.`
-        : baseline.debt > 0n || harness.debt > 0n
-          ? `현재 CRM은 Baseline ${percent(baseline.effectiveRate)}, Harness ${percent(harness.effectiveRate)}입니다.`
-          : '시나리오를 실행하면 두 경로의 Debt, 손실, Cover 회수 가능액을 같은 블록에서 비교합니다.'}</strong>
+      <strong>{scenario === 'concentration' && baseline.debt > 0n && harness.debt === 0n
+        ? `같은 $600 요청에서 Baseline Debt는 $${fmt(baseline.debt)}, Harness Debt는 $0입니다. Harness 실패 거래도 체인에 기록됐습니다.`
+        : scenario === 'recovery' && harness.locked > 0n
+          ? baseline.cover === 0n
+            ? `Baseline은 Cover를 전액 회수했지만 Harness에는 $${fmt(harness.locked)}가 T_lock으로 남아 있습니다.`
+            : `Harness는 $${fmt(harness.locked)}를 잠갔고 Baseline은 $${fmt(baseline.withdrawable)}를 즉시 회수할 수 있습니다.`
+          : scenario === 'history' && harness.effectiveRate > baseline.effectiveRate
+            ? `동일한 Default 후 CRM은 Baseline ${percent(baseline.effectiveRate)}, Harness ${percent(harness.effectiveRate)}입니다.${(baseline.loan?.id ?? 0n) > 1n ? ' Baseline 후속 대출만 실행됐습니다.' : ''}`
+            : scenario
+              ? '아래 단계를 실행하면 선택한 정책의 차이가 같은 블록 기준 지표에 강조됩니다.'
+              : '아래에서 비교할 Harness 정책 시나리오를 먼저 선택하세요.'}</strong>
     </section>
 
     <section className="comparison">
-      <ProtocolCard kind="baseline" state={baseline} policy={policy} expectedBroker={addresses.baselineBroker} />
+      <ProtocolCard kind="baseline" state={baseline} peer={harness} policy={policy} expectedBroker={addresses.baselineBroker} />
       <div className="versus">VS</div>
-      <ProtocolCard kind="harness" state={harness} policy={policy} expectedBroker={addresses.harnessedBroker} />
+      <ProtocolCard kind="harness" state={harness} peer={baseline} policy={policy} expectedBroker={addresses.harnessedBroker} />
     </section>
 
     <section className="scenario">
       <header><div><span className="eyebrow">CHAIN-DERIVED WALKTHROUGH</span><h2>단계별 실행과 온체인 판정</h2>
-        <p>초록색 ‘체인 확인’은 버튼 클릭 여부가 아니라 현재 컨트랙트 상태로 판정합니다.</p></div></header>
+        <p>비교할 정책 하나를 선택합니다. 실행을 시작하면 현재 환경은 해당 시나리오 전용으로 고정됩니다.</p></div></header>
+      <div className="scenario-picker">
+        {SCENARIOS.map(item => <button
+          type="button"
+          key={item.key}
+          className={scenario === item.key ? 'active' : ''}
+          disabled={(baseline.assetsTotal > 0n || harness.assetsTotal > 0n) && scenario !== item.key}
+          onClick={() => chooseScenario(item.key)}
+        >
+          <span>{item.number}</span><b>{item.title}</b><small>{item.summary}</small><em>{item.result}</em>
+        </button>)}
+      </div>
+      {scenario && (baseline.assetsTotal > 0n || harness.assetsTotal > 0n) && <p className="scenario-lock">실행 중에는 시나리오를 바꿀 수 없습니다. 다른 정책은 상단의 ‘새 환경 배포’ 후 선택하세요.</p>}
       <div className="rolebox"><label>브라우저 자동 서명 역할</label>
         <div><small>Owner A · 관리자/심사/공탁</small><b>{roles?.owner || '—'}</b><small>Depositor B · {roles ? short(roles.depositor) : '—'}</small></div>
         <div><small>Borrower C · 대출 조건 승인</small><b>{roles?.borrower || '—'}</b><small>MetaMask 추가 확인 없음</small></div>
       </div>
 
-      <div className="stage-table">
+      {scenario ? <div className="stage-table">
         <div className="stage-header"><span>단계 / 의미</span><span>기존 XLS-66</span><span>Harness 적용</span><span>실행</span></div>
         {stages.map(stage => {
-          const baseStatus = stageStatus(stage.key, baseline, chainTime, false);
-          const harnessStatus = stageStatus(stage.key, harness, chainTime, true);
+          const baseStatus = stageStatus(stage.key, baseline, harness, chainTime, false);
+          const harnessStatus = stageStatus(stage.key, harness, baseline, chainTime, true);
           return <div className="stage-row" key={stage.key}>
             <div className="stage-info"><span>{stage.n}</span><div><b>{stage.title}</b><small>{stage.role} · {stage.tx}</small><p>{stage.explanation}</p></div></div>
-            <div className="stage-side"><Pill status={baseStatus} /><b>{stageEvidence(stage.key, baseline, chainTime, false)}</b></div>
-            <div className="stage-side harness-side"><Pill status={harnessStatus} /><b>{stageEvidence(stage.key, harness, chainTime, true)}</b></div>
+            <div className="stage-side"><Pill status={baseStatus} /><b>{stageEvidence(stage.key, baseline, harness, chainTime, false)}</b></div>
+            <div className="stage-side harness-side"><Pill status={harnessStatus} /><b>{stageEvidence(stage.key, harness, baseline, chainTime, true)}</b></div>
             <div className="stage-action">{stage.key === 'wait' ? <span>자동 판정</span> : <button disabled={!actionEnabled(stage.key)} onClick={() => void run(stage.key)}>{busy === stage.key ? '처리 중…' : '실행'}</button>}</div>
           </div>;
         })}
-      </div>
+      </div> : <div className="scenario-empty">위의 세 정책 중 하나를 선택하면 그 정책에 맞는 실행 단계가 표시됩니다.</div>}
       {error && <div className="error">{error}</div>}
     </section>
 
@@ -610,7 +773,7 @@ export default function App() {
 
     <section className="log"><header><div><span className="eyebrow">TRANSACTION RECEIPTS</span><h3>거래와 반영 블록</h3></div></header>
       {logs.length === 0 ? <p>이 브라우저 세션에서 전송한 거래가 없습니다.</p> : logs.map((log, i) => <div key={`${log.hash || log.label}-${i}`}>
-        <span className={log.status}>{log.status === 'signing' ? '자동 서명' : log.status === 'mining' ? '채굴 중' : log.status === 'confirmed' ? '반영 완료' : '실패'}</span>
+        <span className={log.status}>{log.status === 'signing' ? '자동 서명' : log.status === 'mining' ? '확정 대기' : log.status === 'confirmed' ? '온체인 반영 완료' : log.status === 'verified' ? '정책 차단 확인' : '실패'}</span>
         <b>{log.label}</b>{log.block && <small>block #{log.block.toLocaleString()}</small>}
         {log.hash && <a href={explorer(log.hash)} target="_blank">{short(log.hash)} ↗</a>}</div>)}
     </section>

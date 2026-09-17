@@ -32,6 +32,10 @@ npm run dev
 4. 다음 컨트랙트 배포와 역할 지갑 가스 분배가 자동으로 끝날 때까지 기다립니다.
 5. 화면의 1단계부터 실행 버튼을 차례대로 누릅니다. 이후에는 MetaMask 확인이 없습니다.
 
+배포 후 Concentration limit, Recovery timelock, History-linked cover rate 중 하나를 선택합니다. 각
+시나리오는 대출 금액과 Cover 조건을 해당 정책의 차이가 드러나도록 구성하며, Harness에서 정책으로
+거절되는 거래도 실제 Sepolia 실패 거래로 기록합니다. 한 환경은 한 시나리오에만 사용합니다.
+
 브라우저가 자동으로 배포하는 순서는 다음과 같습니다.
 
 1. `MockUSDC`
