@@ -1,6 +1,5 @@
 export const CHAIN_ID = 11_155_111n;
-export const DEPLOYER = '0x81c2c42bd4a2a5f08f70e4e69e7edf790a815cdc';
-export const DEPLOYMENT_MANIFEST = '/deployment.json';
+export const PUBLIC_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com';
 
 export type DeploymentAddresses = {
   token: string;
@@ -13,6 +12,7 @@ export type DeploymentAddresses = {
 export type DeploymentManifest = {
   chainId: number;
   deployedAt: string;
+  funder: string;
   addresses: DeploymentAddresses;
 };
 
