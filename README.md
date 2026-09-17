@@ -69,8 +69,10 @@ cd frontend
 npm run dev
 ```
 
-프론트엔드는 `public/deployment.json`에서 현재 Sepolia 배포 주소를 읽습니다. Vault와 Broker의 상태는
-MetaMask가 연결한 Sepolia RPC에서 같은 블록을 기준으로 조회합니다.
+프론트엔드는 연결한 MetaMask 주소별로 임시 Owner·Depositor·Borrower 지갑을 만들고, 비교용 컨트랙트를
+브라우저에서 Sepolia에 배포합니다. MetaMask는 임시 Owner의 가스 충전 한 건에만 사용되며, 이후 배포와
+역할별 거래는 임시지갑이 자동으로 서명합니다. 배포 주소와 역할 키는 해당 브라우저에만 저장되고, 상태
+조회와 자동 거래 전송에는 API 키가 없는 공개 Sepolia RPC를 사용합니다.
 
 새로운 테스트 환경을 배포하는 방법은 [DEPLOYMENT.md](./DEPLOYMENT.md)를 참고하십시오.
 
